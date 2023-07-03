@@ -527,4 +527,3 @@ else:
         @property
         def id_objects(self):
             return self.__scene.objects
-

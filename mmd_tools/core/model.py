@@ -93,6 +93,8 @@ def _copy_property(destination: Union[bpy.types.PropertyGroup, bpy.types.bpy_pro
 
 
 class FnModel:
+    """Functions to be used on Model objects.
+    """
     @staticmethod
     def copy_mmd_root(destination_root_object: bpy.types.Object, source_root_object: bpy.types.Object, overwrite: bool = True, replace_name2values: Dict[str,Dict[Any,Any]] = dict()):
         _copy_property(destination_root_object.mmd_root, source_root_object.mmd_root, overwrite=overwrite, replace_name2values=replace_name2values)
@@ -225,6 +227,18 @@ class FnModel:
                 'active_object': parent_armature_object,
                 'selected_editable_objects': [parent_armature_object, child_armature_object],
             })
+
+            def add_armature(child_mesh):
+                armature_modifier: bpy.types.ArmatureModifier = (
+                    mesh.modifiers['mmd_bone_order_override'] if 'mmd_bone_order_override' in mesh.modifiers else
+                    mesh.modifiers.new('mmd_bone_order_override', 'ARMATURE')
+                )
+                if armature_modifier.object is None:
+                    armature_modifier.object = parent_armature_object
+                    mesh.matrix_parent_inverse = child_armature_matrix
+                return armature_modifier
+
+
 
             for mesh in FnModel.child_meshes(parent_armature_object):
                 armature_modifier: bpy.types.ArmatureModifier = (
@@ -407,7 +421,7 @@ class Model:
         self.__temporary_grp: Optional[bpy.types.Object] = None
 
     @staticmethod
-    def create(name, name_e='', scale=1, obj_name=None, armature=None, add_root_bone=False):
+    def create(name, name_e='', scale=1, obj_name=None, armature=None, create_armature=True, add_root_bone=False):
         scene = SceneOp(bpy.context)
         if obj_name is None:
             obj_name = name
@@ -421,6 +435,16 @@ class Model:
         scene.link_object(root)
 
         armObj = armature
+        if armObj is None:
+            if create_armature:
+                # There may be situations where a user may only want an MMD root object with all its properties
+                # without a new armature.  This will let the user avoid having to delete the armature if
+                # it is unneeded.
+                arm = bpy.data.armatures.new(name=obj_name)
+                armObj = bpy.data.objects.new(name=obj_name+'_arm', object_data=arm)
+                armObj.parent = root
+                scene.link_object(armObj)
+
         if armObj:
             m = armObj.matrix_world
             armObj.parent_type = 'OBJECT'
@@ -428,23 +452,17 @@ class Model:
             #armObj.matrix_world = m
             root.matrix_world = m
             armObj.matrix_local.identity()
-        else:
-            arm = bpy.data.armatures.new(name=obj_name)
-            armObj = bpy.data.objects.new(name=obj_name+'_arm', object_data=arm)
-            armObj.parent = root
-            scene.link_object(armObj)
-        armObj.lock_rotation = armObj.lock_location = armObj.lock_scale = [True, True, True]
-        setattr(armObj, Props.show_in_front, True)
-        setattr(armObj, Props.display_type, 'WIRE')
-
-        if add_root_bone:
-            bone_name = u'全ての親'
-            with bpyutils.edit_object(armObj) as data:
-                bone = data.edit_bones.new(name=bone_name)
-                bone.head = [0.0, 0.0, 0.0]
-                bone.tail = [0.0, 0.0, getattr(root, Props.empty_display_size)]
-            armObj.pose.bones[bone_name].mmd_bone.name_j = bone_name
-            armObj.pose.bones[bone_name].mmd_bone.name_e = 'Root'
+            armObj.lock_rotation = armObj.lock_location = armObj.lock_scale = [True, True, True]
+            setattr(armObj, Props.show_in_front, True)
+            setattr(armObj, Props.display_type, 'WIRE')
+            if add_root_bone:
+                bone_name = '全ての親'
+                with bpyutils.edit_object(armObj) as data:
+                    bone = data.edit_bones.new(name=bone_name)
+                    bone.head = [0.0, 0.0, 0.0]
+                    bone.tail = [0.0, 0.0, getattr(root, Props.empty_display_size)]
+                armObj.pose.bones[bone_name].mmd_bone.name_j = bone_name
+                armObj.pose.bones[bone_name].mmd_bone.name_e = 'Root'
 
         bpyutils.select_object(root)
         return Model(root)
@@ -619,7 +637,7 @@ class Model:
         ### Parameters ###
          @param shape_type the shape type.
          @param location location of the rigid body object.
-         @param rotation rotation of the rigid body object.
+         @param  rotation rotation of the rigid body object.
          @param size
          @param dynamics_type the type of dynamics mode. (STATIC / DYNAMIC / DYNAMIC2)
          @param collision_group_number

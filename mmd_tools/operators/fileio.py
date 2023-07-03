@@ -12,7 +12,7 @@ from bpy.types import OperatorFileListElement
 from bpy_extras.io_utils import ImportHelper, ExportHelper
 
 from mmd_tools import auto_scene_setup
-from mmd_tools.utils import makePmxBoneMap
+from mmd_tools.utils import makePmxBoneMap, object_filter
 from mmd_tools.core.camera import MMDCamera
 from mmd_tools.core.lamp import MMDLamp
 from mmd_tools.translations import DictionaryEnum
@@ -471,11 +471,17 @@ class ExportPmx(Operator, ExportHelper):
         description='Disables all the Specular Map textures. It is required for some MME Shaders.',
         default=False,
         )
-    visible_meshes_only: bpy.props.BoolProperty(
-        name='Visible Meshes Only',
-        description='Export visible meshes only',
-        default=False,
-        )
+    mesh_selection_mode : bpy.props.EnumProperty(
+            name="Mesh Selection Mode",
+            description="Which objects to export",
+            items=(
+            ('active', "Active", "Active"),
+            ('selected', "Selected", "Selected"),
+            ('visible', "Visible", "Visible"),
+            ('render', "Rendered", "Visible in the render"),
+            ),
+            default='active',
+            )
     overwrite_bone_morphs_from_pose_library: bpy.props.BoolProperty(
         name='Overwrite Bone Morphs',
         description='Overwrite the bone morphs from active pose library before exporting.',
@@ -553,9 +559,8 @@ class ExportPmx(Operator, ExportHelper):
             context.scene.frame_set(context.scene.frame_current)
 
         try:
-            meshes = rig.meshes()
-            if self.visible_meshes_only:
-                meshes = (x for x in meshes if x in context.visible_objects)
+            meshes = object_filter(rig.meshes(), self.mesh_selection_mode)
+            
             pmx_exporter.export(
                 filepath=self.filepath,
                 scale=self.scale,

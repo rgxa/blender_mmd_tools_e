@@ -5,6 +5,40 @@ import os
 import bpy
 from mmd_tools.bpyutils import SceneOp
 
+def getAObject():
+    """現在のアクティブオブジェクトを取得する
+
+    Args:
+        obj:
+
+    Returns:
+        現在のアクティブオブジェクト
+
+    """
+    if bpy.app.version < (2, 80, 0):
+        return bpy.context.scene.objects.active
+    else:
+        return bpy.context.view_layer.objects.active
+
+def setAObject(obj):
+    """引数をアクティブオブジェクトに設定して、元のアクティブオブジェクトを返す
+
+    Args:
+        obj:
+            ブレンダーのオブジェクト
+
+    Returns:
+        元のアクティブオブジェクト
+
+    """
+    if bpy.app.version < (2, 80, 0):
+        old = bpy.context.scene.objects.active
+        bpy.context.scene.objects.active = obj
+    else:
+        old = bpy.context.view_layer.objects.active
+        bpy.context.view_layer.objects.active = obj
+    return old
+
 ## 指定したオブジェクトのみを選択状態かつアクティブにする
 def selectAObject(obj):
     try:
@@ -218,6 +252,50 @@ def saferelpath(path, start, strategy='inside'):
         result = os.path.relpath(path, start)
     return result
 
+def object_filter(lst, mode, *args, filters=(), **kwargs):
+    """Filter objects using a set of test functions.
+    New options can be added easily by adding a pair of property and test function to object_filters.
+
+    Args:
+        mode:
+            The filter in object_filters to use.
+        filters:
+            Support for additional filters to be passed as arguments.
+            Example: additional_filters = [lambda x: obj.parent is not None] will remove any objects with no parent
+                from the selection.
+        lst:
+            A list of Blender objects.
+
+    Returns:
+            Either:
+                A list of Blender objects for which all test functions return True
+                The original list if no filter options are active
+
+    """
+    # Create a set of options and their respective test functions.
+    default_filters = dict((
+        ("active", lambda ob, *args, **kwargs: ob == getAObject()),
+        ("selected", lambda ob, *args, **kwargs: ob.select),
+        ("render", lambda ob, *args, **kwargs: not ob.hide_render),
+        ("visible", lambda ob, *args, **kwargs: not ob.hide),
+        ("none", lambda ob, *args, **kwargs: False),
+    ))
+    # Get the selected option and its corresponding test function.
+    filter_func = default_filters.get(mode, None)
+    if filter_func is None:
+        raise ValueError("Error in determining mesh filter:  Unknown mesh selection mode:"
+                         + str(mode))
+    # Make a new filter that runs the default filter and all filters in the "filters" argument.
+    def final_filter(ob):
+        return all(f(ob, *args, **kwargs) for f in (filter_func, *filters))
+    # Exclude objects that fail any filter test.
+    return [ob for ob in lst if final_filter(ob)]
+
+def default_armature(child_mesh, arm):
+    armature_modifier = child_mesh.modifiers['mmd_bone_order_override'] if 'mmd_bone_order_override' in child_mesh.modifiers else child_mesh.modifiers.new('mmd_bone_order_override', 'ARMATURE')
+    if armature_modifier.object is None:
+        armature_modifier.object = arm
+    return armature_modifier
 
 class ItemOp:
     @staticmethod
