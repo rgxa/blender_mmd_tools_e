@@ -291,11 +291,32 @@ def object_filter(lst, mode, *args, filters=(), **kwargs):
     # Exclude objects that fail any filter test.
     return [ob for ob in lst if final_filter(ob)]
 
-def default_armature(child_mesh, arm):
-    armature_modifier = child_mesh.modifiers['mmd_bone_order_override'] if 'mmd_bone_order_override' in child_mesh.modifiers else child_mesh.modifiers.new('mmd_bone_order_override', 'ARMATURE')
-    if armature_modifier.object is None:
-        armature_modifier.object = arm
-    return armature_modifier
+def active_filter_code(lst, obj_type="MESH", idx=None):
+    """Sensible default method for selecting an object from a set of objects.
+
+        Returns:
+            In order of priority:
+                Return None if no objects are selected or active.
+                Return any active object.
+                Return the object at index idx.
+                Return the first selected object.
+            Also return a code indicating which path was taken.
+    """
+    obj_type = obj_type.upper()
+    sel_objs = object_filter(lst, "selected", filters=(lambda ob: ob.type == obj_type,))
+    if len(sel_objs) <= 0:
+        return None, 0
+    act_obj = object_filter(sel_objs, "active")
+    if len(act_obj) > 0:
+        return act_obj[0], 1
+    if idx is not None:
+        return sel_objs[idx], 2
+    return sel_objs[0], 3
+
+def active_filter(lst, obj_type="MESH", idx=None):
+    """Convenience wrapper for active_filter_code.
+    """
+    return active_filter_code(lst, obj_type=obj_type, idx=idx)[0]
 
 class ItemOp:
     @staticmethod

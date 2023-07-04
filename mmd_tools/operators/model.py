@@ -3,7 +3,7 @@
 import bpy
 import mmd_tools.core.model as mmd_model
 from bpy.types import Operator
-from mmd_tools.utils import getAObject, setAObject, object_filter
+from mmd_tools.utils import getAObject, setAObject, object_filter, active_filter
 from mmd_tools.bpyutils import SceneOp, activate_layer_collection
 from mmd_tools.core.bone import FnBone
 from mmd_tools.core.model import FnModel
@@ -238,18 +238,19 @@ class CreateMMDModelRoot(Operator):
         description='Weight the mesh objects to the root bone when creating a new armature',
         default=False,
         )
+    # This is here in case the user already has an armature with a root bone they want to parent the mesh to.
+    root_bone_name: bpy.props.StringProperty(
+        name='Root bone name',
+        description='Optional name of the bone in the armature to weight the meshes to. Use * for the active bone.'
+        + '  Overridden by the root bone if one is added.',
+        default='全ての親',
+        )
     '''
     # Some other options I tried that are probably not important enough.
     create_armature: bpy.props.BoolProperty(
         name='Create new armature',
         description='Whether to create a new armature',
         default=True,
-        )
-    target_bone_name: bpy.props.StringProperty(
-        name='Target bone name',
-        description='Optional name of the bone in the armature to weight the meshes to. * for the active bone.'
-        + '  Overridden by the root bone if one is added.',
-        default='*',
         )
     default_root_name_j: bpy.props.StringProperty(
         name='Default bone name',
@@ -277,66 +278,33 @@ class CreateMMDModelRoot(Operator):
 
     def execute(self, context):
         objs = context.visible_objects
-        mesh_objs = object_filter([ob for ob in objs if ob.type == "MESH"], self.parenting)
-        obj = getAObject()
-        arm = None
-        # If the active object is an armature, it makes the most sense to use it instead of any other selected armature.
-        if obj.type == "ARMATURE":
-            arm = obj
+        target_objs = object_filter(objs, self.parenting)
+        mesh_objs = object_filter([ob for ob in target_objs if ob.type == "MESH"], self.parenting)
+        # Try to get an armature from the selection.  The active object will be prioritized if it is an armature.
+        arm = active_filter(target_objs, obj_type="ARMATURE")
+
+        if self.root_bone_name == "*" and (not self.add_root_bone):
+            # This means to get the active bone name.
+            root_name = None
         else:
-            # Use the first selected armature(if any) if the active object is not an armature.
-            # Otherwise, pass None to create a new armature.
-            arms = [ob for ob in context.selected_objects if ob.type == "ARMATURE"]
-            if arm is None and len(arms) > 0:
-                arm = arms[0]
+            root_name = FnBone.get_root_bone_name(arm, self.root_bone_name)
 
         # Create a new MMD model object.
-        rig = mmd_model.Model.create(self.name_j, self.name_e, self.scale, armature=arm,
-                                     add_root_bone=self.add_root_bone
+        rig = mmd_model.Model.create(self.name_j, self.name_e, self.scale,
+                                     armature=arm,
+                                     add_root_bone=self.add_root_bone,
+                                     root_bone_name=root_name,
                                      )
+
         arm = rig.armature()
-
         # TODO: It might be better to have the CreateModel method accept meshes, and move this logic there
-        # If an armature has been determined, parent meshes to it according to the parenting mode.
+        # Parent meshes to the armature according to the parenting mode.
         if arm is not None:
-            bones = arm.data.bones
             for ob in mesh_objs:
-                ob.parent = arm
-                vgroups = ob.vertex_groups
-                FnModel._add_armature_modifier(ob, arm)
-
-                if self.sync_vertex_groups:
-                    for b in bones:
-                        bname = b.name
-                        if vgroups.get(bname, None) is None:
-                            vgroups.new(name=bname)
-                if self.add_root_bone_weights:
-                    verts = ob.data.vertices
-                    if self.add_root_bone:
-                        root_name = "全ての親"
-                    '''
-                    # Code for options that are probably not worth including but I am leaving for review
-                    else:
-                        root_name = self.target_bone_name
-                        if root_name == "*":
-                            # We're using * to refer to the active bone.
-                            # If there are bones on the armature, try to find the active bone name.
-                            # If none exists, parent to the first bone.
-                            if len(bones):
-                                act_bone = bones.active
-                                if act_bone is None:
-                                    root_name = bones[0].name
-                            else:
-                                # If * was used but there are no bones, skip this step with a warning.
-                                print("No bones exist on the armature.\n"
-                                      + "Aborting auto-weighting for object {0}".format(str(ob.name)))
-                                continue
-                    '''
-                    vg = vgroups.get(root_name, None)
-                    if vg is None:
-                        vg = vgroups.new(name=root_name)
-                    if bones.get(root_name, None) is not None:
-                        vg.add(range(len(verts)), 1, "ADD")
+                FnModel.parent_mesh_to_armature(ob, arm,
+                                    root_name=root_name,
+                                    add_root_bone_weights=self.add_root_bone_weights,
+                                    sync_vertex_groups=self.sync_vertex_groups)
 
         rig.initialDisplayFrames()
         return {'FINISHED'}

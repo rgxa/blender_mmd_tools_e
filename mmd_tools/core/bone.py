@@ -8,6 +8,7 @@ import math
 from mathutils import Vector, Quaternion, Matrix
 from mmd_tools import bpyutils
 from mmd_tools.bpyutils import TransformConstraintOp
+from mmd_tools.utils import active_filter
 
 
 def remove_constraint(constraints, name):
@@ -61,7 +62,6 @@ class FnBone(object):
 
     pose_bone = property(__get_pose_bone, __set_pose_bone)
 
-
     @staticmethod
     def get_selected_pose_bones(armature):
         if armature.mode == 'EDIT':
@@ -70,6 +70,33 @@ class FnBone(object):
         context_selected_bones = bpy.context.selected_pose_bones or bpy.context.selected_bones or []
         bones = armature.pose.bones
         return (bones[b.name] for b in context_selected_bones if not bones[b.name].is_mmd_shadow_bone)
+
+    @staticmethod
+    def get_root_bone_name(armature, root_id=None):
+        """Get the root bone name for an armature.
+            Returns:
+                One of:
+                 the active bone name, the name at the index root_id, or root_id(if it is a str or armature is None).
+        TODO: Add a heuristic for finding a root bone.
+        """
+        if armature is None:
+            return root_id
+        bones = armature.data.bones
+        if root_id is None:
+            # Try to find the active bone name.  If none exists, raise an exception.
+            if bones.active is None:
+                raise ValueError("There was no active bone on the armature.\n"
+                             + "Please change the Root Bone Name setting from '*',\n"
+                             + "select a bone, or enable Add Root Bone.")
+            else:
+                root_id = bones.active.name
+        elif type(root_id) is int:
+            # If an index was passed, find the name of the bone at the index.
+            if len(bones) <= 0:
+                ValueError("There were no bones on the armature when attempting to get a bone name.")
+            else:
+                root_id = bones[root_id].name
+        return root_id
 
     @classmethod
     def load_bone_fixed_axis(cls, armature, enable=True):

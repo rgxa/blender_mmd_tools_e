@@ -324,6 +324,9 @@ class FnModel:
     def add_missing_vertex_groups_from_bones(root_object: bpy.types.Object, mesh_object: bpy.types.Object, search_in_all_meshes: bool):
         vertex_group_names: Set[str] = set()
 
+        if root_object.mmd_type != "ROOT":
+            root_object = FnModel.find_root(root_object)
+
         search_meshes = FnModel.child_meshes(root_object) if search_in_all_meshes else [mesh_object]
 
         for search_mesh in search_meshes:
@@ -342,6 +345,35 @@ class FnModel:
                 continue
 
             mesh_object.vertex_groups.new(name=pose_bone_name)
+
+    @staticmethod
+    def parent_mesh_to_armature(mesh_obj, arm_obj, root_name="全ての親", add_root_bone_weights=True, sync_vertex_groups=True):
+        mesh_obj.parent = arm_obj
+        FnModel._add_armature_modifier(mesh_obj, arm_obj)
+        if sync_vertex_groups:
+            FnModel.add_missing_vertex_groups_from_bones(arm_obj, mesh_obj, False)
+        if add_root_bone_weights:
+            FnModel.weight_root_bone(mesh_obj, arm_obj, root_name=root_name)
+
+    @staticmethod
+    def weight_root_bone(mesh_obj, arm_obj, root_name=None):
+        """Weight a mesh object to a bone.  If root_name is None, tries to get the active bone.
+        Throws an exception if no name can be determined for the root bone.
+            Returns:
+                The name of the bone given weights and the vertex group object used.
+        Note:
+            Will add weights even if the bone name does not exist on the armature.
+            Check to make sure that root_name actually matches the intended bone object.
+        """
+        verts = mesh_obj.data.vertices
+        vgroups = mesh_obj.vertex_groups
+        root_name = FnBone.get_root_bone_name(arm_obj, root_id=root_name)
+
+        vg = vgroups.get(root_name, None)
+        if vg is None:
+            vg = vgroups.new(name=root_name)
+        vg.add(range(len(verts)), 1, "ADD")
+        return root_name, vg
 
     @staticmethod
     def change_mmd_ik_loop_factor(root_object: bpy.types.Object, new_ik_loop_factor: int):
@@ -421,7 +453,8 @@ class Model:
         self.__temporary_grp: Optional[bpy.types.Object] = None
 
     @staticmethod
-    def create(name, name_e='', scale=1, obj_name=None, armature=None, create_armature=True, add_root_bone=False):
+    def create(name, name_e='', scale=1, obj_name=None, armature=None, create_armature=True,
+               root_bone_name='全ての親', add_root_bone=False):
         scene = SceneOp(bpy.context)
         if obj_name is None:
             obj_name = name
@@ -456,7 +489,7 @@ class Model:
             setattr(armObj, Props.show_in_front, True)
             setattr(armObj, Props.display_type, 'WIRE')
             if add_root_bone:
-                bone_name = '全ての親'
+                bone_name = root_bone_name
                 with bpyutils.edit_object(armObj) as data:
                     bone = data.edit_bones.new(name=bone_name)
                     bone.head = [0.0, 0.0, 0.0]
